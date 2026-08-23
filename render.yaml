@@ -1,8 +1,0 @@
-services:
-  - type: cron
-    name: site-killer
-    runtime: python
-    buildCommand: ""
-    startCommand: "python killer.py"
-    schedule: "*/5 * * * *"
-    plan: free
