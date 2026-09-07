@@ -1,5 +1,4 @@
 # app.py — Parser для Render (бот @dbuxjdjzi_bot, 2 запроса/сессия)
-# Start: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
 
 import os, re, asyncio, threading, logging, time, sqlite3
 from datetime import datetime, timedelta
@@ -131,7 +130,6 @@ def inc_total(ok=True):
               (1 if ok else 0, 0 if ok else 1, today))
     conn.commit(); conn.close()
 
-# === ЧИСТКА РЕЗУЛЬТАТА — убираем "поиск завершен" ===
 def clean_result(text):
     if not text: return text
     lines = text.strip().split('\n')
@@ -143,7 +141,6 @@ def clean_result(text):
             break
     return '\n'.join(lines).strip()
 
-# === ЖДЁМ РЕЗУЛЬТАТ ПОИСКА ===
 async def wait_search(client, entity, timeout=SEARCH_TIMEOUT):
     start = time.time()
     seen = set()
@@ -158,20 +155,15 @@ async def wait_search(client, entity, timeout=SEARCH_TIMEOUT):
                 seen.add(msg.id)
                 if msg.text:
                     t = msg.text.lower()
-                    # Лимит
                     if any(x in t for x in ['лимит', 'limit', 'flood', 'исчерпан', 'попробуйте позже', 'подпишитесь']):
                         return ('LIMIT', msg.text)
-                    # Поиск завершен — это финальное сообщение с результатом
                     if 'поиск завершен' in t or 'поиск закончен' in t or 'поиск завершён' in t:
                         collected.append(msg.text)
                         return ('DONE', '\n'.join(reversed(collected)))
-                    # Промежуточные сообщения (прогресс) — пропускаем
                     if any(x in t for x in ['searching', 'поиск', 'загруз', 'load', 'wait', 'подожд', 'обрабат', 'process']):
                         continue
-                    # Не найдено
                     if 'not found' in t or 'не найдено' in t or 'no data' in t:
                         return ('DONE', msg.text)
-                    # Обычное сообщение с данными
                     collected.append(msg.text)
                 elif msg.media and msg.message:
                     collected.append(msg.message)
@@ -222,25 +214,23 @@ async def parser_flow(username):
 
             entity = await client.get_entity(BOT_USERNAME)
 
-            # Очистка чата
             msgs = [m.id async for m in client.iter_messages(entity, limit=5)]
             if msgs:
                 await client.delete_messages(entity, msgs)
 
-            # Просто отправляем юзернейм — бот сразу ищет
+            # Отправляем юзернейм сразу
             await client.send_message(entity, username)
             await asyncio.sleep(1)
 
-            # Если бот требует подписку
+            # Если бот просит подписку
             if await check_subscribe(client, entity):
                 await client.send_message(entity, username)
 
-            # Ждём результат
             status, result = await wait_search(client, entity, SEARCH_TIMEOUT)
 
             if status == 'LIMIT':
                 sm.kill(i); inc_total(False)
-                logging.warning(f"{name}: лимит — {result[:50]}")
+                logging.warning(f"{name}: лимит — {result[:50] if result else '?'}")
                 continue
 
             if not result:
@@ -248,7 +238,6 @@ async def parser_flow(username):
                 logging.warning(f"{name}: нет ответа за {SEARCH_TIMEOUT}с")
                 continue
 
-            # Чистим "поиск завершен"
             cleaned = clean_result(result)
 
             if not cleaned or len(cleaned.strip()) < 5:
@@ -323,3 +312,6 @@ def stats():
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({"status": "ok", "bot": BOT_USERNAME, "sessions": len(SESSION_STRINGS), "capacity": len(SESSION_STRINGS) * DAILY_LIMIT})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), threaded=True)
